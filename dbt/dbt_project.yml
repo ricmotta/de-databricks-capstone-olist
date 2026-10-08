@@ -1,0 +1,18 @@
+name: olist_capstone
+version: "1.0.0"
+config-version: 2
+profile: olist_capstone
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+vars:
+  env: dev
+
+models:
+  olist_capstone:
+    silver:
+      +schema: "olist_{{ var('env') }}_silver"
+    gold:
+      +schema: "olist_{{ var('env') }}_gold"
+      +materialized: table

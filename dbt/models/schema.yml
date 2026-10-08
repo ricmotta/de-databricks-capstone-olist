@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: silver_orders
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+
+  - name: fct_order_delivery
+    description: One row per delivered order, with promised vs actual delivery.
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: is_late
+        tests: [not_null]
+
+  - name: dim_customer
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [unique, not_null]

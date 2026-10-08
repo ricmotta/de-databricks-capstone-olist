@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: Current-state tables built by the Bronze pipeline (AUTO CDC).
+    schema: "olist_{{ var('env') }}_bronze"
+    tables:
+      - name: customers
+      - name: sellers
+      - name: products
+      - name: orders
+      - name: order_items
