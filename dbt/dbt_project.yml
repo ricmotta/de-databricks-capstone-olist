@@ -6,13 +6,10 @@ profile: olist_capstone
 model-paths: ["models"]
 macro-paths: ["macros"]
 
-vars:
-  env: dev
-
 models:
   olist_capstone:
     silver:
-      +schema: "olist_{{ var('env') }}_silver"
+      +schema: "olist_{{ var('env', 'dev') }}_silver"
     gold:
-      +schema: "olist_{{ var('env') }}_gold"
+      +schema: "olist_{{ var('env', 'dev') }}_gold"
       +materialized: table
