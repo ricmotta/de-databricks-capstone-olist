@@ -80,7 +80,7 @@ Asset Bundle + GitHub Actions           → deploy dev / stg / prd
       (orders 99,433 + 8 rejected; order_items 112,646 + 4; order_payments 103,881 + 5)
 - [x] dbt Silver + Gold
 - [x] Asset Bundle + GitHub Actions (CI validates on PR; merge deploys stg; prd on manual dispatch)
-- [ ] PII masking
+- [x] PII masking (Gold dim_customer: zip prefix and city masked and tagged; raw only for olist_pii_readers)
 - [ ] Zerobus streaming
 - [ ] Dashboards (cost, audit, pipeline health)
 - [ ] Databricks App
