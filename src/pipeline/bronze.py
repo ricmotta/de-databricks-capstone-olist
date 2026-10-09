@@ -17,7 +17,10 @@ from pyspark.sql import functions as F
 CATALOG = spark.conf.get("catalog", "de_databricks_bp_wave_5")
 ENV     = spark.conf.get("env", "dev")
 
-SOURCE_ROOT = f"/Volumes/{CATALOG}/olist_{ENV}_landing/lakebase_extracts"
+# Lakebase is the single source system, so every environment can read the
+# same landing zone; landing_env decides which one.
+LANDING_ENV = spark.conf.get("landing_env", ENV)
+SOURCE_ROOT = f"/Volumes/{CATALOG}/olist_{LANDING_ENV}_landing/lakebase_extracts"
 BRONZE      = f"{CATALOG}.olist_{ENV}_bronze"
 QUARANTINE  = f"{CATALOG}.olist_{ENV}_quarantine"
 

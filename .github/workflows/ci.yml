@@ -1,0 +1,55 @@
+# Runs on every pull request to main: proves the bundle and the dbt project
+# are valid before anything is merged.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Authenticate as the service principal
+        run: databricks current-user me
+
+      - name: Validate bundle (stg)
+        run: databricks bundle validate -t stg
+
+      - name: Validate bundle (prd)
+        run: databricks bundle validate -t prd
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt
+        run: pip install "dbt-databricks>=1.8.0,<2.0.0"
+
+      # dbt parse compiles every model, source and test without connecting to
+      # a warehouse, so the profile below only needs placeholder credentials.
+      - name: dbt parse (schema dry-run)
+        working-directory: dbt
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'EOF'
+          olist_capstone:
+            target: ci
+            outputs:
+              ci:
+                type: databricks
+                host: factored-databricks-training.cloud.databricks.com
+                http_path: /sql/1.0/warehouses/parse-only
+                catalog: de_databricks_bp_wave_5
+                schema: olist_stg_silver
+                token: not-used-by-parse
+          EOF
+          dbt parse --vars '{env: stg}'

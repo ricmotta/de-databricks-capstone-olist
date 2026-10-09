@@ -78,7 +78,7 @@ Asset Bundle + GitHub Actions           → deploy dev / stg / prd (planned)
 - [x] Bronze pipeline with expectations, quarantine and AUTO CDC — reconciled
       (orders 99,433 + 8 rejected; order_items 112,646 + 4; order_payments 103,881 + 5)
 - [ ] dbt Silver + Gold
-- [ ] Asset Bundle + GitHub Actions
+- [x] Asset Bundle + GitHub Actions (CI validates on PR; merge deploys stg; prd on manual dispatch)
 - [ ] PII masking
 - [ ] Zerobus streaming
 - [ ] Dashboards (cost, audit, pipeline health)
