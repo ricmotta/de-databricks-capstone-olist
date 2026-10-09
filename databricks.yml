@@ -1,0 +1,80 @@
+# Databricks Asset Bundle: every job and pipeline of the platform, as code.
+# The same definitions deploy to dev, stg and prd; only the variables change.
+bundle:
+  name: olist_capstone
+
+include:
+  - resources/*.yml
+
+workspace:
+  host: https://factored-databricks-training.cloud.databricks.com
+
+variables:
+  catalog:
+    description: Unity Catalog catalog shared by every environment.
+    default: de_databricks_bp_wave_5
+  env:
+    description: Environment suffix used in schema names (olist_<env>_<layer>).
+    default: dev
+  landing_env:
+    description: >
+      Environment whose landing volume holds the Lakebase extracts. Lakebase is the
+      single source system, so every environment reads the same raw zone.
+    default: dev
+  warehouse_id:
+    description: SQL warehouse used by dbt.
+    default: "d7f08dc207ff0f34"
+
+targets:
+  # Deployed by a developer from the workspace. Resource names get a [dev user] prefix.
+  dev:
+    mode: development
+    default: true
+    variables:
+      env: dev
+
+  # Deployed by GitHub Actions (service principal) on every merge to main.
+  stg:
+    variables:
+      env: stg
+    resources:
+      schemas:
+        stg_bronze:
+          name: olist_stg_bronze
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (stg) - Bronze tables
+        stg_quarantine:
+          name: olist_stg_quarantine
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (stg) - rows failing data quality rules
+        stg_silver:
+          name: olist_stg_silver
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (stg) - conformed Silver models
+        stg_gold:
+          name: olist_stg_gold
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (stg) - star schema and SLA aggregate
+
+  # Deployed by GitHub Actions only on manual dispatch.
+  prd:
+    variables:
+      env: prd
+    resources:
+      schemas:
+        prd_bronze:
+          name: olist_prd_bronze
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (prd) - Bronze tables
+        prd_quarantine:
+          name: olist_prd_quarantine
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (prd) - rows failing data quality rules
+        prd_silver:
+          name: olist_prd_silver
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (prd) - conformed Silver models
+        prd_gold:
+          name: olist_prd_gold
+          catalog_name: ${var.catalog}
+          comment: Olist capstone (prd) - star schema and SLA aggregate

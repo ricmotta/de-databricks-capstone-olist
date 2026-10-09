@@ -1,0 +1,15 @@
+resources:
+  pipelines:
+    olist_bronze:
+      name: olist_${var.env}_bronze_pipeline
+      catalog: ${var.catalog}
+      schema: olist_${var.env}_bronze
+      serverless: true
+      continuous: false
+      libraries:
+        - file:
+            path: ../src/pipeline/bronze.py
+      configuration:
+        catalog: ${var.catalog}
+        env: ${var.env}
+        landing_env: ${var.landing_env}

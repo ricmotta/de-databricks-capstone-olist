@@ -1,0 +1,42 @@
+# Merge to main deploys staging automatically. Production is deployed only
+# on demand, from the Actions tab (Run workflow -> target: prd).
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Target to deploy
+        required: true
+        default: prd
+        type: choice
+        options: [stg, prd]
+
+concurrency:
+  group: deploy-${{ github.event.inputs.target || 'stg' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
+      TARGET: ${{ github.event.inputs.target || 'stg' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t "$TARGET"
+
+      - name: Deploy bundle
+        run: databricks bundle deploy -t "$TARGET"
+
+      - name: Deployment summary
+        run: databricks bundle summary -t "$TARGET"

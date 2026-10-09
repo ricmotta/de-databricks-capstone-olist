@@ -1,0 +1,35 @@
+# End-to-end refresh: Lakebase extract -> Bronze pipeline -> dbt Silver/Gold.
+resources:
+  jobs:
+    olist_refresh:
+      name: olist_${var.env}_refresh
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: extract_lakebase
+          notebook_task:
+            notebook_path: ../src/ingestion/02_extract_lakebase.ipynb
+
+        - task_key: refresh_bronze
+          depends_on:
+            - task_key: extract_lakebase
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.olist_bronze.id}
+
+        - task_key: dbt_build
+          depends_on:
+            - task_key: refresh_bronze
+          environment_key: dbt
+          dbt_task:
+            project_directory: ../dbt
+            commands:
+              - "dbt build --vars '{env: ${var.env}}'"
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: olist_${var.env}_silver
+
+      environments:
+        - environment_key: dbt
+          spec:
+            environment_version: "2"
+            dependencies:
+              - dbt-databricks>=1.8.0,<2.0.0
