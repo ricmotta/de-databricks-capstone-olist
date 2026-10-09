@@ -77,7 +77,7 @@ Asset Bundle + GitHub Actions           → deploy dev / stg / prd (planned)
 - [x] Incremental extract (02_extract_lakebase), CDC verified
 - [x] Bronze pipeline with expectations, quarantine and AUTO CDC — reconciled
       (orders 99,433 + 8 rejected; order_items 112,646 + 4; order_payments 103,881 + 5)
-- [ ] dbt Silver + Gold
+- [x] dbt Silver + Gold
 - [x] Asset Bundle + GitHub Actions (CI validates on PR; merge deploys stg; prd on manual dispatch)
 - [ ] PII masking
 - [ ] Zerobus streaming
