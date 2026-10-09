@@ -5,6 +5,9 @@ profile: olist_capstone
 
 model-paths: ["models"]
 macro-paths: ["macros"]
+on-run-start:
+  - "{{ create_mask_zip_prefix() }}"
+  - "{{ create_mask_city() }}"
 
 models:
   olist_capstone:
