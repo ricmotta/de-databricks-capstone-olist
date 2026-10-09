@@ -25,6 +25,12 @@ variables:
     description: SQL warehouse used by dbt.
     default: "d7f08dc207ff0f34"
 
+# Applies to the job and pipeline in every target, so the owner can see resources
+# deployed by the service principal.
+permissions:
+  - user_name: ricardo.motta@factored.ai
+    level: CAN_MANAGE
+
 targets:
   # Deployed by a developer from the workspace. Resource names get a [dev user] prefix.
   dev:
@@ -43,18 +49,30 @@ targets:
           name: olist_stg_bronze
           catalog_name: ${var.catalog}
           comment: Olist capstone (stg) - Bronze tables
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
         stg_quarantine:
           name: olist_stg_quarantine
           catalog_name: ${var.catalog}
           comment: Olist capstone (stg) - rows failing data quality rules
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
         stg_silver:
           name: olist_stg_silver
           catalog_name: ${var.catalog}
           comment: Olist capstone (stg) - conformed Silver models
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
         stg_gold:
           name: olist_stg_gold
           catalog_name: ${var.catalog}
           comment: Olist capstone (stg) - star schema and SLA aggregate
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
 
   # Deployed by GitHub Actions only on manual dispatch.
   prd:
@@ -66,15 +84,27 @@ targets:
           name: olist_prd_bronze
           catalog_name: ${var.catalog}
           comment: Olist capstone (prd) - Bronze tables
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
         prd_quarantine:
           name: olist_prd_quarantine
           catalog_name: ${var.catalog}
           comment: Olist capstone (prd) - rows failing data quality rules
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
         prd_silver:
           name: olist_prd_silver
           catalog_name: ${var.catalog}
           comment: Olist capstone (prd) - conformed Silver models
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
         prd_gold:
           name: olist_prd_gold
           catalog_name: ${var.catalog}
           comment: Olist capstone (prd) - star schema and SLA aggregate
+          grants:
+            - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]

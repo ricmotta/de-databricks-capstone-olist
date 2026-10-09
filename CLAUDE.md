@@ -18,7 +18,7 @@ Lakebase (Postgres, OLTP source)
                  └─ dbt/                → Silver (incremental) + Gold (star schema)
 Zerobus Ingest (streaming)              → order status events (planned)
 Databricks App (Streamlit)              → reads Gold aggregate (planned)
-Asset Bundle + GitHub Actions           → deploy dev / stg / prd (planned)
+Asset Bundle + GitHub Actions           → deploy dev / stg / prd
 ```
 
 ## Environment facts (do not change without asking)
@@ -37,7 +37,8 @@ Asset Bundle + GitHub Actions           → deploy dev / stg / prd (planned)
   `format("postgresql")` (options: host, port, database, dbtable, user, password).
 - Personal access tokens are disabled. CI/CD authenticates as a service principal via OAuth M2M:
   GitHub secrets `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`.
-- System tables: only `system.billing` is readable today (access/query/lakeflow requested).
+- System tables: billing, access, query and lakeflow are readable.
+- stg/prd are deployed by the service principal; databricks.yml grants ricardo.motta@factored.ai access so those resources are visible.
 
 ## Conventions
 
