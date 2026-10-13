@@ -30,6 +30,8 @@ variables:
 permissions:
   - user_name: ricardo.motta@factored.ai
     level: CAN_MANAGE
+  - user_name: daniel.rivas@factored.ai
+    level: CAN_MANAGE
 
 targets:
   # Deployed by a developer from the workspace. Resource names get a [dev user] prefix.
@@ -52,12 +54,16 @@ targets:
           grants:
             - principal: ricardo.motta@factored.ai
               privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
+              privileges: [ALL_PRIVILEGES]
         stg_quarantine:
           name: olist_stg_quarantine
           catalog_name: ${var.catalog}
           comment: Olist capstone (stg) - rows failing data quality rules
           grants:
             - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
               privileges: [ALL_PRIVILEGES]
         stg_silver:
           name: olist_stg_silver
@@ -66,12 +72,16 @@ targets:
           grants:
             - principal: ricardo.motta@factored.ai
               privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
+              privileges: [ALL_PRIVILEGES]
         stg_gold:
           name: olist_stg_gold
           catalog_name: ${var.catalog}
           comment: Olist capstone (stg) - star schema and SLA aggregate
           grants:
             - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
               privileges: [ALL_PRIVILEGES]
 
   # Deployed by GitHub Actions only on manual dispatch.
@@ -87,12 +97,16 @@ targets:
           grants:
             - principal: ricardo.motta@factored.ai
               privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
+              privileges: [ALL_PRIVILEGES]
         prd_quarantine:
           name: olist_prd_quarantine
           catalog_name: ${var.catalog}
           comment: Olist capstone (prd) - rows failing data quality rules
           grants:
             - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
               privileges: [ALL_PRIVILEGES]
         prd_silver:
           name: olist_prd_silver
@@ -101,10 +115,14 @@ targets:
           grants:
             - principal: ricardo.motta@factored.ai
               privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
+              privileges: [ALL_PRIVILEGES]
         prd_gold:
           name: olist_prd_gold
           catalog_name: ${var.catalog}
           comment: Olist capstone (prd) - star schema and SLA aggregate
           grants:
             - principal: ricardo.motta@factored.ai
+              privileges: [ALL_PRIVILEGES]
+            - principal: daniel.rivas@factored.ai
               privileges: [ALL_PRIVILEGES]
