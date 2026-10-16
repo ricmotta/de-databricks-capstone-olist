@@ -1,0 +1,6 @@
+carrier,type,orders,late_rate,avg_transit_days,avg_cost_brl,late_orders
+Carrier A (national),Parcel,41200,0.052,7.1,18.4,2142
+Carrier B (national),Parcel,27800,0.071,8.6,16.9,1974
+Carrier C (regional SE),Regional,13900,0.038,4.9,14.2,528
+Carrier D (regional NE),Regional,7400,0.118,11.8,21.7,873
+Carrier E (postal),Postal,6170,0.149,13.2,12.6,919

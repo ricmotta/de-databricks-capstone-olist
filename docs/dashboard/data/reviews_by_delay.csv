@@ -1,0 +1,9 @@
+bucket_order,delay_bucket,orders,avg_review,one_star_share,five_star_share,is_late
+1,15+ days early,34771,4.32,0.0654,0.6428,False
+2,8–14 days early,36158,4.31,0.0641,0.6302,False
+3,1–7 days early,17234,4.2,0.0707,0.5749,False
+4,On the day,1280,4.03,0.0852,0.5063,False
+5,1–3 days late,1852,3.29,0.2511,0.3315,True
+6,4–7 days late,1748,2.1,0.5858,0.1407,True
+7,8–14 days late,1446,1.67,0.7061,0.0685,True
+8,15+ days late,1335,1.72,0.6899,0.0719,True

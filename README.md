@@ -25,6 +25,13 @@ built to answer one business question:
 **What it means:** two different problems. Remote states have *unrealistic promises* (high rate,
 low volume); Rio has *high rate and high volume*, which makes it the first place to act.
 
+### 👀 See it
+
+[![Delivery SLA dashboard](docs/dashboard/preview.png)](https://ricmotta.github.io/de-databricks-capstone-olist/dashboard/)
+
+- 📊 **[Open the dashboard](https://ricmotta.github.io/de-databricks-capstone-olist/dashboard/)**: overview, where delays concentrate, why they happen, what they cost, and what the platform could show with more data (simulated, and labelled as such)
+- 🎬 **[Watch the 90-second story](https://ricmotta.github.io/de-databricks-capstone-olist/story/)** of one late order ([MP4](docs/media/order-6535.mp4))
+
 ---
 
 ## 🏗️ Architecture
@@ -113,6 +120,7 @@ flowchart LR
 | Dashboard | Answers |
 |---|---|
 | **Olist · Delivery SLA** | Late rate, late orders by state, trend by month |
+| **Delivery SLA (public)** | Static version on [GitHub Pages](https://ricmotta.github.io/de-databricks-capstone-olist/dashboard/): adds delivery steps, routes, sellers, categories and review impact. Data refreshed with `src/tools/export_dashboard_data` |
 | **Olist · Pipeline Health** | Runs, success rate, task durations, data quality by rule (pipeline event log) |
 | **Olist · Cost** | DBUs and estimated cost per job/pipeline. The whole project cost about **$2** of compute |
 | **Olist · Audit** | Who accessed what, top actions, permission denials |
@@ -130,11 +138,18 @@ flowchart LR
 │   ├── setup/01_load_lakebase      # One-time seed of Lakebase with the Olist CSVs
 │   ├── ingestion/02_extract_lakebase   # Incremental extract (watermark)
 │   ├── pipeline/bronze.py          # Bronze: Auto Loader, expectations, quarantine, AUTO CDC
-│   └── tools/simulate_order_update # Changes one order to test CDC end to end
+│   └── tools/
+│       ├── simulate_order_update   # Changes one order to test CDC end to end
+│       ├── export_dashboard_data   # Exports the public dashboard's CSVs from Gold
+│       └── dashboard_queries.py    # The SQL behind each dashboard CSV
 ├── dbt/
 │   ├── models/silver/              # Cleaning and standardization
 │   ├── models/gold/                # Star schema + SLA aggregate
 │   └── macros/                     # Schema naming, PII mask functions
+├── docs/                           # GitHub Pages
+│   ├── dashboard/                  # Static Delivery SLA dashboard + its CSVs
+│   ├── story/                      # 90-second animated story
+│   └── media/                      # Story video (MP4)
 └── .github/workflows/
     ├── ci.yml                      # Validation on every PR
     └── deploy.yml                  # stg on merge, prd on demand
@@ -148,6 +163,7 @@ flowchart LR
 2. **Deploy dev**: from the workspace Git folder, open the bundle and **Deploy** the `dev` target.
 3. **Run** the job `[dev <user>] olist_dev_refresh`.
 4. **Test CDC** (optional): run `src/tools/simulate_order_update`, then run the job again; the change flows to Gold.
+5. **Refresh the public dashboard** (optional): run `src/tools/export_dashboard_data`, download the CSVs from the landing volume (`exports/dashboard/`), replace the files in `docs/dashboard/data/` and open a PR.
 
 stg and prd are deployed by GitHub Actions; see *Environments and CI/CD*.
 
@@ -158,7 +174,8 @@ stg and prd are deployed by GitHub Actions; see *Environments and CI/CD*.
 - **Streaming:** an order-status event loop through **Zerobus** into a streaming table
 - **Databricks App** on top of Gold
 - **Scheduled runs** for staging and production (requires a Lakebase role for the service principal)
-- Deeper analysis: **seller → customer routes** and the impact of delays on **review scores**
+- Ingest the Olist **geolocation** table, so distance analysis comes from the platform instead of the public file
+- Publish the **Delivery SLA** AI/BI dashboard through the bundle (`.lvdash.json` in `resources/`)
 
 ---
 
