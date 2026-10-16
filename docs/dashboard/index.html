@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Olist Delivery SLA</title>
+<meta name="description" content="Delivery SLA dashboard for the Olist e-commerce dataset: late rate, where delays concentrate, why, and what they cost. Databricks capstone.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Standalone shell: the design tokens the dashboard expects, light and dark. */
+:root{
+  --font-anthropic-sans:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  --font-anthropic-serif:"Newsreader",Georgia,"Times New Roman",serif;
+  --cds-font-size-caption:.8125rem; --cds-font-size-body:.9375rem; --cds-font-size-heading:1.0625rem; --cds-font-size-title:1.75rem;
+  --cds-font-weight-medium:500;
+  --cds-gap-xs:4px; --cds-gap-sm:8px; --cds-gap-md:16px; --cds-gap-lg:24px; --cds-gap-xl:32px;
+  --cds-pad-xs:6px; --cds-pad-sm:10px; --cds-pad-md:14px; --cds-pad-lg:20px;
+  --cds-radius:10px; --cds-dur-slow:.3s; --cds-ease-out:cubic-bezier(.2,.8,.2,1);
+  --color-bg:#F5F5F2; --color-panel:#FFFFFF; --color-fg:#14233A; --color-fg-muted:#5E6878;
+  --color-border-line:rgba(30,78,140,.14); --color-ok:#1F7A4D; --color-warn:#A86A00; --color-bad:#C2361F;
+  --cds-chart-grid:#E3E3DE; --cds-chart-axis:#C3C2B7; --cds-chart-reference:#9A9A92;
+  --cds-surface-popover:#FFFFFF; --cds-border:rgba(30,78,140,.18); --cds-shadow-popover:0 6px 20px rgba(16,32,64,.16); --cds-text-secondary:#5E6878;
+  --shell-link:#1E4E8C;
+  color-scheme:light;
+}
+:root[data-mode=dark]{
+  --color-bg:#0F151E; --color-panel:#18212D; --color-fg:#E6EAF0; --color-fg-muted:#9AA6B6;
+  --color-border-line:rgba(169,198,236,.16); --color-ok:#5CC48B; --color-warn:#E9B44C; --color-bad:#F07A62;
+  --cds-chart-grid:#26303D; --cds-chart-axis:#3A4554; --cds-chart-reference:#6B7686;
+  --cds-surface-popover:#1F2936; --cds-border:rgba(169,198,236,.2); --cds-shadow-popover:0 6px 20px rgba(0,0,0,.5); --cds-text-secondary:#9AA6B6;
+  --shell-link:#A9C6EC;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--color-bg);color:var(--color-fg);font-family:var(--font-anthropic-sans);font-size:15px}
+.shell{max-width:1400px;margin:0 auto;padding-inline:clamp(16px,3vw,32px);padding-block:14px 8px;display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;justify-content:space-between;font-size:.85rem;color:var(--color-fg-muted)}
+.shell a{color:var(--shell-link);text-decoration:none;font-weight:500}
+.shell a:hover{text-decoration:underline}
+.shell nav{display:flex;gap:16px;flex-wrap:wrap}
+#dash-root{--dash-gutter:clamp(16px,3vw,32px);padding-inline:var(--dash-gutter);padding-block:4px 24px}
+.dash-skeleton{color:transparent!important;background:var(--color-border-line);border-radius:6px;display:inline-block;min-width:3ch;animation:sk 1.2s ease-in-out infinite alternate}
+@keyframes sk{from{opacity:.5}to{opacity:1}}
+.olx-fail{min-height:60px}
+@media (prefers-reduced-motion: reduce){.dash-skeleton{animation:none}}
+</style>
+<script>
+/* Follow the OS theme; the dashboard styles key off data-mode. */
+(function(){var m=window.matchMedia('(prefers-color-scheme: dark)');function s(){document.documentElement.dataset.mode=m.matches?'dark':'light'}s();m.addEventListener&&m.addEventListener('change',s);})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+/* Minimal stand-in for the dashboard runtime: loads the CSVs in ./data and redraws on data, filter and resize. */
+(function(){
+  var IDS=['sla_by_state','sla_monthly','stage_times','routes','distance_bands','categories','reviews_by_delay','delay_distribution','repeat_purchase','sellers','sim_carriers','sim_live_at_risk','sim_promise_model','sim_tracking'];
+  var store={}, subs=[], defaults={state:'ALL'}, params=Object.assign({},defaults), raf=null;
+  IDS.forEach(function(id){store[id]={status:'loading',data:[],columns:[]};});
+  function emit(){ if(raf) return; raf=requestAnimationFrame(function(){raf=null; subs.forEach(function(fn){try{fn();}catch(e){console.error(e);}});}); }
+  IDS.forEach(function(id){
+    fetch('data/'+id+'.csv',{cache:'no-cache'}).then(function(r){ if(!r.ok) throw new Error(r.status); return r.text(); })
+      .then(function(t){ var rows=d3.csvParse(t); store[id]={status:'ok',data:rows,columns:rows.columns}; emit(); })
+      .catch(function(e){ store[id]={status:'error',data:[],columns:[],message:String(e)}; emit(); });
+  });
+  var ro=new ResizeObserver(function(){emit();});
+  window.addEventListener('DOMContentLoaded',function(){ ro.observe(document.getElementById('dash-root')); });
+  window.dash={
+    data:function(id){ return store[id]||{status:'missing',data:[],columns:[]}; },
+    onData:function(fn){ subs.push(fn); try{fn();}catch(e){console.error(e);} },
+    params:function(){ return Object.assign({},params); },
+    setParams:function(p){ Object.assign(params,p); emit(); },
+    resetParams:function(){ params=Object.assign({},defaults); emit(); },
+    setLink:function(name){ try{ history.replaceState(null,'','#'+name); }catch(e){} },
+    refresh:function(){},
+    colors:['#1E4E8C','#5B8FD1','#A9C6EC','#E0452B','#7A869A','#2F65AA','#86ADE0','#D6D6D0']
+  };
+})();
+</script>
+</head>
+<body>
+<header class="shell">
+  <span>Olist Delivery SLA · Databricks Upskill capstone</span>
+  <nav><a href="../story/">Watch the 90-second story</a><a href="https://github.com/ricmotta/de-databricks-capstone-olist">Source on GitHub</a></nav>
+</header>
+<div id="dash-root">
+<style>
+#dash-root .olx{--olx-c1:#1E4E8C;--olx-c2:#5B8FD1;--olx-c3:#A9C6EC;--olx-late:#E0452B;--olx-neutral:#D6D6D0;--olx-r1:#1E4E8C;--olx-r2:#2F65AA;--olx-r3:#4778BF;--olx-r4:#5B8FD1;--olx-r5:#86ADE0;--olx-r6:#A9C6EC;--olx-ink-dark:#0C2A52;--olx-ink-light:#FFFFFF}
+[data-mode=dark] #dash-root .olx,.cds-root[data-mode=dark] #dash-root .olx{--olx-c1:#7FAAE6;--olx-c2:#4A7BC0;--olx-c3:#2C4F80;--olx-late:#F0603F;--olx-neutral:#55554F;--olx-r1:#A9C6EC;--olx-r2:#86ADE0;--olx-r3:#6B98D6;--olx-r4:#4F80C4;--olx-r5:#3A68A8;--olx-r6:#2C4F80;--olx-ink-dark:#FFFFFF;--olx-ink-light:#FFFFFF}
+@media (prefers-color-scheme: dark){[data-mode=system] #dash-root .olx,.cds-root:not([data-mode]) #dash-root .olx{--olx-c1:#7FAAE6;--olx-c2:#4A7BC0;--olx-c3:#2C4F80;--olx-late:#F0603F;--olx-neutral:#55554F;--olx-r1:#A9C6EC;--olx-r2:#86ADE0;--olx-r3:#6B98D6;--olx-r4:#4F80C4;--olx-r5:#3A68A8;--olx-r6:#2C4F80;--olx-ink-dark:#FFFFFF}}
+#dash-root .olx{position:relative;font-family:var(--font-anthropic-sans);color:var(--color-fg);font-variant-numeric:tabular-nums;max-width:1400px;margin-inline:auto}
+.olx *{box-sizing:border-box}
+.olx-hero{display:grid;grid-template-columns:auto 1fr;gap:var(--cds-gap-md);align-items:center;padding:var(--cds-pad-lg);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);background:var(--color-panel);position:relative;overflow:hidden}
+.olx-hero::after{content:"";position:absolute;inset:auto 0 0 0;height:4px;background:repeating-linear-gradient(90deg,var(--olx-late) 0 14px,transparent 14px 22px);opacity:.55}
+.olx-mark{width:52px;height:52px;border-radius:var(--cds-radius);display:grid;place-items:center;background:var(--color-bg);border:1px solid var(--color-border-line)}
+.olx-eyebrow{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);letter-spacing:.06em;text-transform:uppercase;margin:0 0 2px}
+.olx-title{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);margin:0;line-height:1.15}
+.olx-take{margin:var(--cds-gap-sm) 0 0;color:var(--color-fg-muted);font-size:var(--cds-font-size-body);max-width:70ch}
+.olx-take b,.olx .olx-strong{color:var(--color-fg);font-weight:600}
+.olx-route{grid-column:1/-1;display:flex;align-items:center;gap:0;margin-top:var(--cds-gap-xs)}
+.olx-route span{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);white-space:nowrap;display:flex;align-items:center;gap:6px}
+.olx-route span::before{content:"";width:9px;height:9px;border-radius:50%;border:2px solid var(--color-fg-muted);background:var(--color-panel)}
+.olx-route span:last-child::before{border-color:var(--olx-late);background:var(--olx-late)}
+.olx-route i{flex:1;min-width:12px;height:0;border-top:2px dashed var(--color-border-line);margin:0 8px}
+.olx-bar{display:flex;flex-wrap:wrap;gap:var(--cds-gap-sm);align-items:center;justify-content:space-between;margin:var(--cds-gap-md) 0;position:sticky;top:0;z-index:3;background:var(--color-bg);padding:var(--cds-pad-xs) 0}
+.olx-tabs{display:flex;gap:4px;flex-wrap:wrap}
+.olx-tab{font:inherit;font-size:var(--cds-font-size-body);border:1px solid var(--color-border-line);background:var(--color-panel);color:var(--color-fg-muted);padding:6px 12px;border-radius:999px;cursor:pointer;display:flex;gap:6px;align-items:center}
+.olx-tab[aria-selected=true]{color:var(--color-fg);border-color:var(--color-fg);background:var(--color-bg)}
+.olx-tab .olx-badge{font-size:10px}
+.olx-badge{font-size:var(--cds-font-size-caption);border:1px dashed var(--color-warn);color:var(--color-warn);padding:1px 7px;border-radius:999px;white-space:nowrap}
+.olx-filter{display:flex;gap:var(--cds-gap-xs);align-items:center;font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.olx-filter select,.olx-filter button,.olx-search{font:inherit;font-size:var(--cds-font-size-body);color:var(--color-fg);background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:5px 8px}
+.olx-filter button{cursor:pointer}
+.olx-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr));gap:var(--cds-gap-md);margin-bottom:var(--cds-gap-md)}
+.olx-kpi{background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-md) var(--cds-pad-lg);display:flex;flex-direction:column;gap:4px;min-height:118px}
+.olx-kpi h4{margin:0;font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);font-weight:var(--cds-font-weight-medium)}
+.olx-big{font-family:var(--font-anthropic-serif);font-weight:400;font-size:calc(var(--cds-font-size-title) * 1.25);line-height:1.1}
+.olx-big.olx-bad{color:var(--color-bad)}
+.olx-sub{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.olx-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,24rem),1fr));gap:var(--cds-gap-md);margin-bottom:var(--cds-gap-md)}
+.olx-card{background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-lg);min-width:0;position:relative}
+.olx-card.olx-wide{grid-column:1/-1}
+.olx-card.olx-sim{border-style:dashed}
+.olx-card h3{margin:0;font-size:var(--cds-font-size-heading);font-weight:var(--cds-font-weight-medium);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.olx-note{margin:4px 0 var(--cds-gap-md);font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.olx-needs{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin-top:var(--cds-gap-sm);padding-top:var(--cds-gap-sm);border-top:1px dashed var(--color-border-line)}
+.olx-chart{min-height:240px;width:100%;position:relative}
+.olx-chart svg{display:block;overflow:visible}
+.olx-chart text{fill:var(--color-fg-muted);font-size:var(--cds-font-size-caption);font-family:var(--font-anthropic-sans)}
+.olx-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin-bottom:var(--cds-gap-sm)}
+.olx-legend span{display:inline-flex;align-items:center;gap:6px}
+.olx-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.olx-legend i.olx-line{height:2px;border-radius:2px;width:14px}
+.olx-tip{position:absolute;z-index:5;background:var(--cds-surface-popover);border:1px solid var(--cds-border);border-radius:var(--cds-radius);box-shadow:var(--cds-shadow-popover);padding:var(--cds-pad-xs) var(--cds-pad-sm);font-size:var(--cds-font-size-caption);pointer-events:none;min-width:140px;display:none}
+.olx-tip .t0{color:var(--cds-text-secondary);margin-bottom:2px}
+.olx-tip .tl{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.olx-tip .tl em{font-style:normal;display:flex;gap:6px;align-items:center;color:var(--color-fg-muted)}
+.olx-tip .tl i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.olx-hb{display:grid;grid-template-columns:minmax(6rem,11rem) 1fr auto;gap:6px 10px;align-items:center;font-size:var(--cds-font-size-caption)}
+.olx-hb .l{color:var(--color-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.olx-hb .tr{height:14px;background:transparent;position:relative}
+.olx-hb .fl{height:100%;border-radius:4px;min-width:2px}
+.olx-hb .v{color:var(--color-fg);text-align:right;white-space:nowrap}
+.olx-hb .v small{color:var(--color-fg-muted);margin-left:6px;font-size:inherit}
+.olx-hb .ref{position:absolute;top:-3px;bottom:-3px;border-left:1px dashed var(--cds-chart-reference)}
+.olx-tw{max-height:420px;overflow:auto;border-radius:var(--cds-radius)}
+.olx table{width:100%;border-collapse:collapse;font-size:var(--cds-font-size-caption)}
+.olx th{position:sticky;top:0;background:var(--color-panel);text-align:right;font-weight:var(--cds-font-weight-medium);color:var(--color-fg-muted);padding:6px 8px;border-bottom:1px solid var(--color-border-line);white-space:nowrap;z-index:1}
+.olx th button{all:unset;cursor:pointer}
+.olx th[aria-sort=ascending] button::after{content:" ↑"}
+.olx th[aria-sort=descending] button::after{content:" ↓"}
+.olx td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--color-border-line);white-space:nowrap}
+.olx th:first-child,.olx td:first-child,.olx th.olx-tl,.olx td.olx-tl{text-align:left}
+.olx tbody tr{cursor:default}
+.olx tbody tr.olx-click{cursor:pointer}
+.olx tbody tr.olx-click:hover td{background:var(--color-bg)}
+.olx tr.olx-on td{background:var(--color-bg);font-weight:600}
+.olx td .cb{display:inline-block;height:8px;border-radius:4px;vertical-align:middle;margin-right:6px;background:var(--olx-late);opacity:.8}
+.olx-pill{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid var(--color-border-line)}
+.olx-risk{font-weight:600}
+.olx-split{display:flex;height:34px;border-radius:6px;overflow:hidden;margin:var(--cds-gap-sm) 0}
+.olx-split div{display:flex;align-items:center;padding:0 10px;color:var(--color-bg);font-size:var(--cds-font-size-caption);font-weight:600;white-space:nowrap;overflow:hidden}
+.olx-h2{font-size:var(--cds-font-size-heading);font-weight:var(--cds-font-weight-medium);margin:var(--cds-gap-lg) 0 var(--cds-gap-sm);display:flex;gap:8px;align-items:center}
+.olx-h2 small{color:var(--color-fg-muted);font-weight:400;font-size:var(--cds-font-size-caption)}
+.olx-banner{border:1px dashed var(--color-warn);border-radius:var(--cds-radius);padding:var(--cds-pad-md) var(--cds-pad-lg);margin-bottom:var(--cds-gap-md);font-size:var(--cds-font-size-body);color:var(--color-fg-muted)}
+.olx-banner b{color:var(--color-fg)}
+.olx-foot{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin:var(--cds-gap-lg) 0 var(--cds-gap-md);line-height:1.6}
+.olx-fail{display:flex;align-items:center;justify-content:center;gap:8px;min-height:inherit;height:100%;color:var(--color-fg-muted);font-size:var(--cds-font-size-caption)}
+.olx-fail::before{content:"";width:.375rem;height:.375rem;border-radius:50%;background:var(--color-bad)}
+.olx [data-dash-source-state=empty]{color:transparent}
+.olx [data-dash-source-state=refreshing]{opacity:.5;transition:opacity var(--cds-dur-slow)}
+.olx-pane[hidden]{display:none}
+@media (max-width:560px){.olx-hb{grid-template-columns:minmax(5rem,7rem) 1fr auto}.olx-hide-n{display:none}}
+
+#dash-root .olx{--olx-sh-1:0 1px 2px rgba(16,32,64,.06),0 4px 12px rgba(16,32,64,.06);--olx-sh-2:0 2px 4px rgba(16,32,64,.08),0 12px 28px rgba(16,32,64,.12);--olx-hl:inset 0 1px 0 rgba(255,255,255,.7);--olx-sheen:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 60%);--olx-stage:linear-gradient(180deg,rgba(30,78,140,.05),rgba(30,78,140,0) 420px)}
+[data-mode=dark] #dash-root .olx,.cds-root[data-mode=dark] #dash-root .olx{--olx-sh-1:0 1px 2px rgba(0,0,0,.4),0 6px 16px rgba(0,0,0,.35);--olx-sh-2:0 2px 6px rgba(0,0,0,.5),0 16px 36px rgba(0,0,0,.5);--olx-hl:inset 0 1px 0 rgba(255,255,255,.06);--olx-sheen:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,0) 60%);--olx-stage:linear-gradient(180deg,rgba(127,170,230,.06),rgba(127,170,230,0) 420px)}
+@media (prefers-color-scheme: dark){[data-mode=system] #dash-root .olx,.cds-root:not([data-mode]) #dash-root .olx{--olx-sh-1:0 1px 2px rgba(0,0,0,.4),0 6px 16px rgba(0,0,0,.35);--olx-sh-2:0 2px 6px rgba(0,0,0,.5),0 16px 36px rgba(0,0,0,.5);--olx-hl:inset 0 1px 0 rgba(255,255,255,.06);--olx-sheen:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,0) 60%);--olx-stage:linear-gradient(180deg,rgba(127,170,230,.06),rgba(127,170,230,0) 420px)}}
+#dash-root .olx{background-image:var(--olx-stage);border-radius:16px;padding-bottom:4px}
+.olx .olx-hero,.olx .olx-kpi,.olx .olx-card{border-radius:14px;border-color:transparent;box-shadow:var(--olx-sh-1),var(--olx-hl);background-image:var(--olx-sheen)}
+.olx .olx-card.olx-sim{border:1px dashed var(--color-warn)}
+.olx .olx-hero{box-shadow:var(--olx-sh-2),var(--olx-hl)}
+.olx .olx-kpi{position:relative;overflow:hidden}
+.olx .olx-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--olx-c1);border-radius:14px 0 0 14px}
+.olx #kpi-late::before,.olx #kpi-lategmv::before,.olx #kpi-rv-late::before{background:var(--olx-late)}
+.olx .olx-mark{box-shadow:var(--olx-sh-1),var(--olx-hl);background:var(--olx-c1);color:#fff;border:0;border-radius:14px}
+.olx .olx-tabs{background:var(--color-panel);padding:4px;border-radius:999px;box-shadow:inset 0 1px 3px rgba(16,32,64,.12)}
+.olx .olx-tab{border-color:transparent;background:transparent}
+.olx .olx-tab[aria-selected=true]{background:var(--color-bg);border-color:transparent;box-shadow:var(--olx-sh-1),var(--olx-hl)}
+.olx .olx-filter select,.olx .olx-filter button,.olx .olx-search{border-radius:10px;box-shadow:var(--olx-sh-1)}
+.olx .olx-bar{background:transparent;backdrop-filter:blur(8px)}
+.olx .olx-hb .fl{background-image:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,0) 70%);box-shadow:0 1px 2px rgba(16,32,64,.18)}
+.olx .olx-split{box-shadow:var(--olx-sh-1),inset 0 1px 0 rgba(255,255,255,.25)}
+.olx .olx-chart svg rect,.olx .olx-chart svg circle{filter:drop-shadow(0 1px 1.5px rgba(16,32,64,.18))}
+.olx .olx-tw{box-shadow:inset 0 0 0 1px var(--color-border-line)}
+@media (prefers-reduced-motion: no-preference){
+.olx .olx-kpi,.olx .olx-card{transition:transform var(--cds-dur-slow) var(--cds-ease-out),box-shadow var(--cds-dur-slow) var(--cds-ease-out)}
+.olx .olx-kpi:hover,.olx .olx-card:hover{transform:translateY(-3px);box-shadow:var(--olx-sh-2),var(--olx-hl)}
+.olx .olx-tab{transition:background var(--cds-dur-slow),box-shadow var(--cds-dur-slow)}}
+</style>
+
+<div class="olx" id="olx">
+  <header class="olx-hero" id="top">
+    <div class="olx-mark" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/><path d="m7.5 5.2 9 4.6" opacity=".6"/></svg>
+    </div>
+    <div>
+      <p class="olx-eyebrow">Olist e-commerce · Delivery SLA</p>
+      <h1 class="olx-title">Delivery SLA command center</h1>
+      <p class="olx-take" id="takeaway">In <b data-source="sla_by_state" data-field="state_name" data-where="state=ALL" class="olx-k dash-skeleton">—</b>,
+        <b data-source="sla_by_state" data-field="late_rate" data-where="state=ALL" class="olx-k dash-skeleton" data-fmt="pct">—</b> of delivered orders arrived after the promised date.
+        Late orders arrived <b data-source="sla_by_state" data-field="avg_delay_days_when_late" data-where="state=ALL" class="olx-k dash-skeleton" data-fmt="d1">—</b> days past the promise and were rated
+        <b data-source="sla_by_state" data-field="avg_review_late" data-where="state=ALL" class="olx-k dash-skeleton" data-fmt="d2">—</b> stars, against
+        <b data-source="sla_by_state" data-field="avg_review_on_time" data-where="state=ALL" class="olx-k dash-skeleton" data-fmt="d2">—</b> when on time.</p>
+    </div>
+    <div class="olx-route" aria-hidden="true"><span>Purchased</span><i></i><span>Approved</span><i></i><span>Handed to carrier</span><i></i><span>Delivered</span><i></i><span>Promised date</span></div>
+  </header>
+
+  <div class="olx-bar">
+    <div class="olx-tabs" role="tablist">
+      <button class="olx-tab" role="tab" id="tab-overview" data-pane="overview" aria-selected="true">Overview</button>
+      <button class="olx-tab" role="tab" id="tab-where" data-pane="where" aria-selected="false">Where</button>
+      <button class="olx-tab" role="tab" id="tab-why" data-pane="why" aria-selected="false">Why</button>
+      <button class="olx-tab" role="tab" id="tab-impact" data-pane="impact" aria-selected="false">Customer impact</button>
+      <button class="olx-tab" role="tab" id="tab-next" data-pane="next" aria-selected="false">With ideal data <span class="olx-badge">simulated</span></button>
+    </div>
+    <label class="olx-filter">Customer state
+      <select id="state-select" data-source="sla_by_state" aria-label="Customer state"></select>
+      <button id="state-reset" type="button" hidden>Reset</button>
+    </label>
+  </div>
+
+  <!-- ============ OVERVIEW ============ -->
+  <section class="olx-pane" id="overview">
+    <div class="olx-kpis">
+      <div class="olx-kpi" id="kpi-delivered"><h4>Delivered orders</h4>
+        <div class="olx-big olx-k dash-skeleton" data-source="sla_by_state" data-field="delivered_orders" data-where="state=ALL" data-fmt="int">—</div>
+        <div class="olx-sub">Sep 2016 – Aug 2018</div></div>
+      <div class="olx-kpi" id="kpi-late"><h4>Late rate</h4>
+        <div class="olx-big olx-bad olx-k dash-skeleton" data-source="sla_by_state" data-field="late_rate" data-where="state=ALL" data-fmt="pct">—</div>
+        <div class="olx-sub"><span class="olx-k" data-source="sla_by_state" data-field="late_orders" data-where="state=ALL" data-fmt="int">—</span> orders after the promised date</div></div>
+      <div class="olx-kpi" id="kpi-delay"><h4>Average delay when late</h4>
+        <div class="olx-big olx-k dash-skeleton" data-source="sla_by_state" data-field="avg_delay_days_when_late" data-where="state=ALL" data-fmt="days">—</div>
+        <div class="olx-sub">Days between promised and actual delivery</div></div>
+      <div class="olx-kpi" id="kpi-promise"><h4>Actual vs promised delivery time</h4>
+        <div class="olx-big"><span class="olx-k dash-skeleton" data-source="sla_by_state" data-field="avg_delivery_days" data-where="state=ALL" data-fmt="d1">—</span><span class="olx-sub"> d</span> / <span class="olx-k dash-skeleton" data-source="sla_by_state" data-field="avg_promised_days" data-where="state=ALL" data-fmt="d1">—</span><span class="olx-sub"> d</span></div>
+        <div class="olx-sub">Average days from purchase, actual / promised</div></div>
+      <div class="olx-kpi" id="kpi-review"><h4>Review score, late vs on time</h4>
+        <div class="olx-big"><span class="olx-k dash-skeleton" style="color:var(--color-bad)" data-source="sla_by_state" data-field="avg_review_late" data-where="state=ALL" data-fmt="d2">—</span><span class="olx-sub"> vs </span><span class="olx-k dash-skeleton" data-source="sla_by_state" data-field="avg_review_on_time" data-where="state=ALL" data-fmt="d2">—</span></div>
+        <div class="olx-sub">Average stars, 1 to 5</div></div>
+    </div>
+
+    <div class="olx-grid">
+      <div class="olx-card olx-wide" id="card-trend">
+        <h3>Late rate by month</h3>
+        <p class="olx-note">Orders by promised-delivery month, Feb 2017 – Aug 2018. Bars are delivered orders; the line is the share delivered late.</p>
+        <div class="olx-legend"><span><i style="background:var(--olx-neutral)"></i>Delivered orders</span><span><i class="olx-line" style="background:var(--olx-late)"></i>Late rate</span></div>
+        <div class="olx-chart" id="chart-trend" data-source="sla_monthly" style="min-height:280px"></div>
+      </div>
+      <div class="olx-card olx-wide" id="card-dist">
+        <h3>How far from the promise orders arrive</h3>
+        <p class="olx-note">All Brazil. Days between actual delivery and promised date; left of the line is early, right is late. Ends are grouped at 45+ days early and 30+ days late.</p>
+        <div class="olx-chart" id="chart-dist" data-source="delay_distribution" style="min-height:220px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHERE ============ -->
+  <section class="olx-pane" id="where" hidden>
+    <div class="olx-grid">
+      <div class="olx-card olx-wide" id="card-quadrant">
+        <h3>Two different problems</h3>
+        <p class="olx-note">Each circle is a customer state: volume across, late rate up, size is late orders. Top-right states hurt most. Dashed lines are the national late rate and 1,000 orders. Click a state to filter the dashboard.</p>
+        <div class="olx-chart" id="chart-quadrant" data-source="sla_by_state" style="min-height:340px"></div>
+      </div>
+      <div class="olx-card olx-wide" id="card-states">
+        <h3>SLA by customer state</h3>
+        <p class="olx-note">Click a row to filter. Sort by any column.</p>
+        <div class="olx-tw">
+          <table id="tbl-states" data-source="sla_by_state" data-row-key="state">
+            <thead><tr>
+              <th data-field="state"><button>State</button></th>
+              <th data-field="state_name" class="olx-tl olx-hide-n"><button>Name</button></th>
+              <th data-field="delivered_orders"><button>Delivered</button></th>
+              <th data-field="late_orders"><button>Late</button></th>
+              <th data-field="late_rate"><button>Late rate</button></th>
+              <th data-field="avg_delay_days_when_late" class="olx-hide-n"><button>Delay when late (d)</button></th>
+              <th data-field="avg_delivery_days" class="olx-hide-n"><button>Actual (d)</button></th>
+              <th data-field="avg_promised_days" class="olx-hide-n"><button>Promised (d)</button></th>
+              <th data-field="avg_review_late" class="olx-hide-n"><button>Review when late</button></th>
+            </tr></thead><tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="olx-card" id="card-routes">
+        <h3>Routes with the most late orders</h3>
+        <p class="olx-note">Seller state → customer state, routes with 100+ orders. Bar is late orders; the late rate is beside it.</p>
+        <div id="chart-routes" class="olx-hb" data-source="routes"></div>
+      </div>
+      <div class="olx-card" id="card-distance">
+        <h3>Late rate by distance</h3>
+        <p class="olx-note">Straight-line distance between seller and customer zip codes. Days are actual / promised.</p>
+        <div id="chart-distance" class="olx-hb" data-source="distance_bands"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHY ============ -->
+  <section class="olx-pane" id="why" hidden>
+    <div class="olx-grid">
+      <div class="olx-card olx-wide" id="card-stages">
+        <h3>Where the days go</h3>
+        <p class="olx-note"><span id="stage-scope">—</span>. Average days in each step, on-time vs late orders. The tick marks the average promised time.</p>
+        <div class="olx-legend" id="stage-legend"></div>
+        <div class="olx-chart" id="chart-stages" data-source="stage_times" style="min-height:150px"></div>
+      </div>
+      <div class="olx-card" id="card-cause">
+        <h3>Who caused the late orders</h3>
+        <p class="olx-note">Share of late orders where the seller handed the parcel to the carrier after its shipping limit date.</p>
+        <div class="olx-split" id="cause-split" data-source="sla_by_state"></div>
+        <p class="olx-note" style="margin:0">Most late orders were handed off on time and lost the days in carrier transit. A missed seller handoff explains <b class="olx-k olx-strong" data-source="sla_by_state" data-field="seller_late_share" data-where="state=ALL" data-fmt="pct">—</b>.</p>
+      </div>
+      <div class="olx-card" id="card-categories">
+        <h3>Late rate by product category</h3>
+        <p class="olx-note">15 largest categories by delivered orders (category of the order's first item). Dashed line is the national rate.</p>
+        <div id="chart-categories" class="olx-hb" data-source="categories sla_by_state"></div>
+      </div>
+      <div class="olx-card olx-wide" id="card-sellers">
+        <h3>Sellers with the most late orders</h3>
+        <p class="olx-note">Sellers with 50+ delivered orders (ID shortened). A missed handoff is a parcel given to the carrier after its shipping limit.</p>
+        <input class="olx-search" id="seller-search" type="search" placeholder="Search seller or state" aria-label="Search sellers" style="margin-bottom:var(--cds-gap-sm)">
+        <div class="olx-tw">
+          <table id="tbl-sellers" data-source="sellers" data-row-key="seller">
+            <thead><tr>
+              <th data-field="seller"><button>Seller</button></th>
+              <th data-field="seller_state" class="olx-tl"><button>State</button></th>
+              <th data-field="orders"><button>Orders</button></th>
+              <th data-field="late_orders"><button>Late</button></th>
+              <th data-field="late_rate"><button>Late rate</button></th>
+              <th data-field="missed_handoff_rate"><button>Missed handoff</button></th>
+              <th data-field="avg_handoff_days" class="olx-hide-n"><button>Handoff (d)</button></th>
+              <th data-field="avg_review" class="olx-hide-n"><button>Review</button></th>
+            </tr></thead><tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ IMPACT ============ -->
+  <section class="olx-pane" id="impact" hidden>
+    <div class="olx-kpis">
+      <div class="olx-kpi" id="kpi-lategmv"><h4>Order value delivered late</h4>
+        <div class="olx-big olx-bad olx-k dash-skeleton" data-source="sla_by_state" data-field="late_gmv_brl" data-where="state=ALL" data-fmt="brl">—</div>
+        <div class="olx-sub">of <span class="olx-k" data-source="sla_by_state" data-field="gmv_brl" data-where="state=ALL" data-fmt="brl">—</span> delivered, item prices</div></div>
+      <div class="olx-kpi" id="kpi-rv-late"><h4>Review score when late</h4>
+        <div class="olx-big olx-bad olx-k dash-skeleton" data-source="sla_by_state" data-field="avg_review_late" data-where="state=ALL" data-fmt="d2">—</div>
+        <div class="olx-sub">vs <span class="olx-k" data-source="sla_by_state" data-field="avg_review_on_time" data-where="state=ALL" data-fmt="d2">—</span> when on time</div></div>
+      <div class="olx-kpi" id="kpi-repeat"><h4>Customers who bought again</h4>
+        <div class="olx-big"><span class="olx-k dash-skeleton" style="color:var(--color-bad)" data-source="repeat_purchase" data-field="repeat_rate" data-where="first_order=Late" data-fmt="pct">—</span><span class="olx-sub"> vs </span><span class="olx-k dash-skeleton" data-source="repeat_purchase" data-field="repeat_rate" data-where="first_order=On%20time" data-fmt="pct">—</span></div>
+        <div class="olx-sub">All Brazil. First order late vs on time</div></div>
+    </div>
+    <div class="olx-grid">
+      <div class="olx-card olx-wide" id="card-reviews">
+        <h3>Review score falls off a cliff after the promised date</h3>
+        <p class="olx-note">All Brazil. Average review by how early or late the order arrived. The share of 1-star reviews is above each bar.</p>
+        <div class="olx-chart" id="chart-reviews" data-source="reviews_by_delay" style="min-height:260px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ NEXT (SIMULATED) ============ -->
+  <section class="olx-pane" id="next" hidden>
+    <div class="olx-banner"><b>Simulated data.</b> This tab shows what the dashboard answers once the data planned for the platform exists: order-status events streamed through Zerobus, carrier and tracking data, and a delivery-time model. Every number here is illustrative, not from Olist, and is not filtered by state.</div>
+    <div class="olx-grid">
+      <div class="olx-card olx-sim olx-wide" id="card-live">
+        <h3>Orders at risk right now <span class="olx-badge">simulated</span></h3>
+        <p class="olx-note">In-transit orders the model expects to miss their promise, highest risk first: who to call, re-route or compensate before the customer complains.</p>
+        <div class="olx-tw">
+          <table id="tbl-live" data-source="sim_live_at_risk" data-row-key="order_ref">
+            <thead><tr>
+              <th data-field="order_ref"><button>Order</button></th>
+              <th data-field="customer_state" class="olx-tl"><button>State</button></th>
+              <th data-field="carrier" class="olx-tl olx-hide-n"><button>Carrier</button></th>
+              <th data-field="current_stage" class="olx-tl"><button>Stage</button></th>
+              <th data-field="days_to_promise"><button>Days to promise</button></th>
+              <th data-field="predicted_delay_days"><button>Predicted delay (d)</button></th>
+              <th data-field="risk_score"><button>Risk</button></th>
+            </tr></thead><tbody></tbody>
+          </table>
+        </div>
+        <div class="olx-needs">Needs: order-status events in a streaming table (Zerobus) and a delay-risk model scored on each event.</div>
+      </div>
+      <div class="olx-card olx-sim olx-wide" id="card-track">
+        <h3>Tracking milestones: where late orders lose time <span class="olx-badge">simulated</span></h3>
+        <p class="olx-note">Median hours spent in each step, on-time vs late orders. Olist only has three timestamps; carrier scans split the transit into steps.</p>
+        <div class="olx-legend" id="track-legend"></div>
+        <div class="olx-chart" id="chart-track" data-source="sim_tracking" style="min-height:150px"></div>
+        <div class="olx-needs">Needs: carrier tracking scans (pickup, hub in/out, out for delivery).</div>
+      </div>
+      <div class="olx-card olx-sim" id="card-carriers">
+        <h3>Carrier scorecard <span class="olx-badge">simulated</span></h3>
+        <p class="olx-note">Late rate per carrier, with average transit days and cost per order.</p>
+        <div id="chart-carriers" class="olx-hb" data-source="sim_carriers"></div>
+        <div class="olx-needs">Needs: the carrier on each shipment, with freight cost.</div>
+      </div>
+      <div class="olx-card olx-sim" id="card-promise">
+        <h3>A promise set by a model <span class="olx-badge">simulated</span></h3>
+        <p class="olx-note">Today's promised days and late rate by region (real Olist values) against what a delivery-time model could promise. Shorter promises sell better; the model keeps the late rate near 5–6%.</p>
+        <div class="olx-legend"><span><i style="background:var(--olx-neutral)"></i>Promised today</span><span><i style="background:var(--color-fg)"></i>Model promise</span></div>
+        <div id="chart-promise" data-source="sim_promise_model"></div>
+        <div class="olx-needs">Needs: a delivery-time model trained on Gold (route, distance, seller handoff history, carrier, season).</div>
+      </div>
+    </div>
+  </section>
+
+  <p class="olx-foot" id="definitions"><b>Definitions.</b> Delivered orders are orders with status <i>delivered</i> and a delivery date. An order is <b>late</b> when its delivery date (calendar day) is after the promised (estimated) delivery date, the same rule as <code>fct_order_delivery</code>. Seller, product and category come from the order's first item; reviews use each order's latest review. <b>Data.</b> Aggregates of the public Olist dataset (Sep 2016 – Aug 2018), produced by the SQL in <code>src/tools/dashboard_queries.py</code>, which <code>src/tools/export_dashboard_data</code> runs against Gold. The published CSVs (in <code>docs/dashboard/data/</code>) come from the raw public files, so they differ by one order from Gold, which also holds the CDC test update. Distance bands use the public Olist geolocation file, which the platform does not ingest yet. Everything in the <i>With ideal data</i> tab is simulated.</p>
+  <div class="olx-tip" id="olx-tip"></div>
+</div>
+
+<script>
+(() => {
+  const root = document.getElementById('olx');
+  const tipEl = document.getElementById('olx-tip');
+  const C = {
+    late: 'var(--olx-late)', muted: 'var(--olx-neutral)', c1: 'var(--olx-c1)', c2: 'var(--olx-c2)', c3: 'var(--olx-c3)', grid: 'var(--cds-chart-grid)',
+    axis: 'var(--cds-chart-axis)', ref: 'var(--cds-chart-reference)', fg: 'var(--color-fg)', fgm: 'var(--color-fg-muted)'
+  };
+  const F = {
+    int: d3.format(','), pct: d3.format('.1%'), pct0: d3.format('.0%'), d1: d3.format('.1f'), d2: d3.format('.2f'),
+    days: (v) => d3.format('.1f')(v) + ' d',
+    brl: (v) => 'R$ ' + new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v),
+    compact: (v) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v)
+  };
+  const N = (v) => (v === '' || v == null || v === 'NaN') ? null : +v;
+  const get = (id) => { const d = dash.data(id); return d.status === 'ok' ? d.data : null; };
+  const failed = (id) => { const s = dash.data(id).status; return s === 'error' || s === 'connect' || s === 'declined' || s === 'missing'; };
+  const curState = () => dash.params().state || 'ALL';
+  const fmtVal = (v, f) => { const n = N(v); if (f && n == null) return '—'; return f ? F[f](n) : (v ?? '—'); };
+  window.olxF = F;
+
+  // ---------- tooltip ----------
+  function tip(event, title, lines) {
+    tipEl.replaceChildren();
+    const t = document.createElement('div'); t.className = 't0'; t.textContent = title; tipEl.append(t);
+    lines.forEach((l) => {
+      const row = document.createElement('div'); row.className = 'tl';
+      const em = document.createElement('em');
+      if (l.color) { const i = document.createElement('i'); i.style.background = l.color; em.append(i); }
+      em.append(document.createTextNode(l.label));
+      const b = document.createElement('span'); b.textContent = l.value;
+      row.append(em, b); tipEl.append(row);
+    });
+    tipEl.style.display = 'block';
+    const rb = root.getBoundingClientRect();
+    let x = event.clientX - rb.left + 14, y = event.clientY - rb.top + 14;
+    const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    if (x + w > rb.width) x = event.clientX - rb.left - w - 14;
+    if (x < 0) x = 0;
+    if (y + h > rb.height) y = rb.height - h;
+    tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+  }
+  const hideTip = () => { tipEl.style.display = 'none'; };
+
+  function measure(svg, texts) {
+    const t = svg.append('text').style('font-size', 'var(--cds-font-size-caption)');
+    let m = 0; texts.forEach((s) => { t.text(s); m = Math.max(m, t.node().getComputedTextLength()); });
+    t.remove(); return m;
+  }
+  function clean(axisG) { axisG.attr('font-size', null).attr('font-family', null); axisG.select('.domain').remove(); axisG.selectAll('line').attr('stroke', C.grid); }
+  function failBox(el) { el.replaceChildren(); const d = document.createElement('div'); d.className = 'olx-fail'; d.textContent = 'Failed to load'; el.append(d); }
+
+  // ---------- state filter ----------
+  const sel = document.getElementById('state-select');
+  const reset = document.getElementById('state-reset');
+  sel.addEventListener('change', () => dash.setParams({ state: sel.value }));
+  reset.addEventListener('click', () => dash.setParams({ state: 'ALL' }));
+  function drawFilter() {
+    const rows = get('sla_by_state') || [];
+    if (sel.options.length !== rows.length) {
+      const opts = rows.slice().sort((a, b) => a.state === 'ALL' ? -1 : b.state === 'ALL' ? 1 : a.state_name.localeCompare(b.state_name))
+        .map((r) => new Option(r.state === 'ALL' ? 'All Brazil' : `${r.state_name} (${r.state})`, r.state));
+      sel.replaceChildren(...opts);
+    }
+    sel.value = curState(); reset.hidden = curState() === 'ALL';
+  }
+
+  // ---------- single-value marks ----------
+  function drawMarks() {
+    const st = curState();
+    root.querySelectorAll('.olx-k').forEach((el) => {
+      const src = el.dataset.source;
+      if (src === 'sla_by_state') el.setAttribute('data-where', 'state=' + encodeURIComponent(st));
+      const rows = get(src);
+      if (!rows) { if (failed(src)) { el.classList.remove('dash-skeleton'); el.textContent = '—'; } return; }
+      const [k, v] = el.getAttribute('data-where').split('=');
+      const row = rows.find((r) => r[k] === decodeURIComponent(v));
+      el.classList.remove('dash-skeleton');
+      el.textContent = row ? fmtVal(row[el.dataset.field], el.dataset.fmt) : '—';
+    });
+  }
+
+  // ---------- trend ----------
+  function drawTrend() {
+    const el = document.getElementById('chart-trend'); el.replaceChildren();
+    if (failed('sla_monthly')) return failBox(el);
+    const all = get('sla_monthly'); if (!all) return;
+    const rows = all.filter((r) => r.state === curState()).map((r) => ({ month: r.month, date: new Date(r.month + '-01T00:00:00Z'), n: N(r.delivered_orders), late: N(r.late_orders), rate: N(r.late_rate), delay: N(r.avg_delay_days_when_late) }));
+    const W = el.clientWidth, H = 280;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+    const yN = d3.scaleLinear([0, d3.max(rows, (d) => d.n) || 1], [0, 0]).nice();
+    const yR = d3.scaleLinear([0, Math.max(0.05, d3.max(rows, (d) => d.rate) || 0)], [0, 0]).nice();
+    const ml = measure(svg, yN.ticks(5).map(F.compact)) + 10, mr = measure(svg, yR.ticks(5).map(F.pct0)) + 10;
+    const m = { t: 22, r: mr, b: 26, l: ml };
+    yN.range([H - m.b, m.t]); yR.range([H - m.b, m.t]);
+    const x = d3.scaleBand(rows.map((d) => d.month), [m.l, W - m.r]).padding(0.25);
+    svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(yN).ticks(5).tickSize(-(W - m.l - m.r)).tickFormat(F.compact)).call(clean);
+    svg.append('g').attr('transform', `translate(${W - m.r},0)`).call(d3.axisRight(yR).ticks(5).tickSize(0).tickFormat(F.pct0)).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').remove(); g.selectAll('text').attr('dx', 4); });
+    const every = Math.ceil(rows.length / Math.max(2, Math.floor((W - m.l - m.r) / 60)));
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickSize(0).tickPadding(8).tickValues(rows.filter((_, i) => i % every === 0).map((d) => d.month)).tickFormat((s) => d3.utcFormat("%b '%y")(new Date(s + '-01T00:00:00Z')))).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').attr('stroke', C.axis); });
+    svg.append('g').selectAll('rect').data(rows).join('rect').attr('x', (d) => x(d.month)).attr('width', x.bandwidth()).attr('y', (d) => yN(d.n)).attr('height', (d) => yN(0) - yN(d.n)).attr('rx', 3).style('fill', C.muted).attr('class', 'olx-b');
+    const line = d3.line().x((d) => x(d.month) + x.bandwidth() / 2).y((d) => yR(d.rate)).defined((d) => d.rate != null);
+    svg.append('path').datum(rows).attr('d', line).style('fill', 'none').style('stroke', C.late).attr('stroke-width', 2).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round');
+    const dots = svg.append('g').selectAll('circle').data(rows).join('circle').attr('cx', (d) => x(d.month) + x.bandwidth() / 2).attr('cy', (d) => yR(d.rate)).attr('r', 2.5).style('fill', C.late);
+    // label the two worst months
+    const ranked = rows.filter((d) => d.n >= 50).sort((a, b) => b.rate - a.rate); const top = ranked.slice(0, 1); const far = ranked.find((d) => top.length && Math.abs(rows.indexOf(d) - rows.indexOf(top[0])) > 2); if (far) top.push(far);
+    svg.append('g').selectAll('text').data(top).join('text').attr('x', (d) => x(d.month) + x.bandwidth() / 2).attr('y', (d) => yR(d.rate) - 9).attr('text-anchor', 'middle').style('fill', C.fg).style('font-weight', 600)
+      .text((d) => `${d3.utcFormat('%b %Y')(d.date)} · ${F.pct(d.rate)}`)
+      .each(function () { const b = this.getBBox(); if (b.x < m.l) d3.select(this).attr('text-anchor', 'start').attr('x', m.l); if (b.x + b.width > W - m.r) d3.select(this).attr('text-anchor', 'end').attr('x', W - m.r); });
+    svg.append('g').selectAll('rect').data(rows).join('rect').attr('x', (d) => x(d.month) - x.step() * x.paddingInner() / 2).attr('width', x.step()).attr('y', m.t).attr('height', H - m.t - m.b).style('fill', 'transparent')
+      .on('mousemove', (e, d) => {
+        dots.attr('r', (o) => o === d ? 5 : 2.5);
+        tip(e, d3.utcFormat('%B %Y')(d.date), [
+          { label: 'Delivered', value: F.int(d.n), color: C.muted },
+          { label: 'Late', value: F.int(d.late) },
+          { label: 'Late rate', value: F.pct(d.rate), color: C.late },
+          { label: 'Delay when late', value: d.delay == null ? '—' : F.days(d.delay) }]);
+      }).on('mouseleave', () => { dots.attr('r', 2.5); hideTip(); });
+  }
+
+  // ---------- delay distribution ----------
+  function drawDist() {
+    const el = document.getElementById('chart-dist'); el.replaceChildren();
+    if (failed('delay_distribution')) return failBox(el);
+    const raw = get('delay_distribution'); if (!raw) return;
+    const rows = raw.map((r) => ({ d: N(r.delay_days), n: N(r.orders) }));
+    const W = el.clientWidth, H = 220;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+    const y = d3.scaleLinear([0, d3.max(rows, (r) => r.n)], [0, 0]).nice();
+    const m = { t: 22, r: 8, b: 26, l: measure(svg, y.ticks(4).map(F.compact)) + 10 };
+    y.range([H - m.b, m.t]);
+    const x = d3.scaleBand(rows.map((r) => r.d), [m.l, W - m.r]).padding(0.15);
+    svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickSize(-(W - m.l - m.r)).tickFormat(F.compact)).call(clean);
+    const lbl = (d) => d === -45 ? '45+ early' : d === 30 ? '30+ late' : d === 0 ? '0' : (d > 0 ? '+' + d : d);
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickSize(0).tickPadding(8).tickValues(rows.map((r) => r.d).filter((d) => d % 15 === 0)).tickFormat(lbl)).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').attr('stroke', C.axis); });
+    const col = (d) => d > 0 ? C.late : d === 0 ? C.fgm : C.c1;
+    const bars = svg.append('g').selectAll('rect').data(rows).join('rect').attr('x', (r) => x(r.d)).attr('width', x.bandwidth()).attr('y', (r) => y(r.n)).attr('height', (r) => y(0) - y(r.n)).attr('rx', 2).style('fill', (r) => col(r.d));
+    const x0 = x(0) + x.bandwidth() / 2;
+    svg.append('line').attr('x1', x0).attr('x2', x0).attr('y1', m.t - 6).attr('y2', H - m.b).style('stroke', C.ref).attr('stroke-dasharray', '4 3');
+    svg.append('text').attr('x', x0 + 6).attr('y', m.t - 8).text('Promised date →').style('fill', C.fg);
+    svg.append('g').selectAll('rect').data(rows).join('rect').attr('x', (r) => x(r.d)).attr('width', x.step()).attr('y', m.t).attr('height', H - m.t - m.b).style('fill', 'transparent')
+      .on('mousemove', (e, r) => { bars.style('opacity', (o) => o === r ? 1 : 0.55); tip(e, r.d === 0 ? 'On the promised day' : r.d < 0 ? (r.d === -45 ? '45+ days early' : `${-r.d} days early`) : (r.d === 30 ? '30+ days late' : `${r.d} days late`), [{ label: 'Orders', value: F.int(r.n), color: col(r.d) }]); })
+      .on('mouseleave', () => { bars.style('opacity', 1); hideTip(); });
+  }
+
+  // ---------- quadrant ----------
+  function drawQuadrant() {
+    const el = document.getElementById('chart-quadrant'); el.replaceChildren();
+    if (failed('sla_by_state')) return failBox(el);
+    const raw = get('sla_by_state'); if (!raw) return;
+    const nat = N(raw.find((r) => r.state === 'ALL').late_rate);
+    const rows = raw.filter((r) => r.state !== 'ALL').map((r) => ({ st: r.state, name: r.state_name, n: N(r.delivered_orders), late: N(r.late_orders), rate: N(r.late_rate), delay: N(r.avg_delay_days_when_late) }));
+    const W = el.clientWidth, H = 340;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+    const y = d3.scaleLinear([0, d3.max(rows, (r) => r.rate) * 1.08], [0, 0]).nice();
+    const m = { t: 16, r: 22, b: 36, l: measure(svg, y.ticks(5).map(F.pct0)) + 12 };
+    y.range([H - m.b, m.t]);
+    const x = d3.scaleLog([d3.min(rows, (r) => r.n) * 0.8, d3.max(rows, (r) => r.n) * 1.25], [m.l, W - m.r]);
+    const r = d3.scaleSqrt([0, d3.max(rows, (d) => d.late)], [3, Math.max(14, Math.min(30, W / 28))]);
+    svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r)).tickFormat(F.pct0)).call(clean);
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues([100, 300, 1000, 3000, 10000, 30000].filter((v) => v >= x.domain()[0] && v <= x.domain()[1])).tickSize(0).tickPadding(8).tickFormat(F.compact)).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').attr('stroke', C.axis); });
+    svg.append('text').attr('x', W - m.r).attr('y', H - 4).attr('text-anchor', 'end').text('Delivered orders (log scale) →');
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(nat)).attr('y2', y(nat)).style('stroke', C.ref).attr('stroke-dasharray', '4 3');
+    svg.append('text').attr('x', m.l + 4).attr('y', y(nat) - 5).text('National ' + F.pct(nat));
+    svg.append('line').attr('x1', x(1000)).attr('x2', x(1000)).attr('y1', m.t).attr('y2', H - m.b).style('stroke', C.ref).attr('stroke-dasharray', '4 3');
+    svg.append('text').attr('x', W - m.r).attr('y', m.t + 10).attr('text-anchor', 'end').style('fill', C.late).style('font-weight', 600).text('High rate, high volume');
+    svg.append('text').attr('x', m.l + 4).attr('y', m.t + 10).style('fill', C.fg).text('Unrealistic promises, low volume');
+    const st = curState();
+    const g = svg.append('g').selectAll('g').data(rows.sort((a, b) => b.late - a.late)).join('g').attr('transform', (d) => `translate(${x(d.n)},${y(d.rate)})`).style('cursor', 'pointer');
+    const hot = (d) => d.rate > nat && d.n >= 1000;
+    g.append('circle').attr('r', (d) => r(d.late)).style('fill', (d) => hot(d) ? C.late : d.rate > nat ? C.c2 : C.c3).style('fill-opacity', (d) => st === 'ALL' || st === d.st ? 0.55 : 0.15)
+      .style('stroke', (d) => st === d.st ? C.fg : 'var(--color-panel)').attr('stroke-width', (d) => st === d.st ? 2 : 1);
+    g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em').style('fill', C.fg).style('font-weight', (d) => hot(d) || st === d.st ? 600 : 400).style('pointer-events', 'none').text((d) => d.st);
+    g.on('mousemove', (e, d) => tip(e, `${d.name} (${d.st})`, [
+      { label: 'Delivered', value: F.int(d.n) }, { label: 'Late orders', value: F.int(d.late) },
+      { label: 'Late rate', value: F.pct(d.rate), color: C.late }, { label: 'Delay when late', value: d.delay == null ? '—' : F.days(d.delay) }]))
+      .on('mouseleave', hideTip)
+      .on('click', (e, d) => dash.setParams({ state: st === d.st ? 'ALL' : d.st }));
+  }
+
+  // ---------- sortable tables ----------
+  const sortState = {};
+  function table(id, rows, cols, opts = {}) {
+    const t = document.getElementById(id); const tb = t.querySelector('tbody');
+    const ths = [...t.querySelectorAll('th')];
+    if (!t.dataset.wired) {
+      t.dataset.wired = '1';
+      ths.forEach((th) => th.querySelector('button').addEventListener('click', () => {
+        const f = th.dataset.field; const s = sortState[id] || {};
+        sortState[id] = { f, dir: s.f === f && s.dir === 'descending' ? 'ascending' : 'descending' }; t._render();
+      }));
+      if (opts.click) tb.addEventListener('click', (e) => { const tr = e.target.closest('tr[data-key]'); if (tr) opts.click(tr.dataset.key); });
+    }
+    function render() {
+      const s = sortState[id] || opts.sort || {};
+      ths.forEach((th) => th.setAttribute('aria-sort', th.dataset.field === s.f ? s.dir : 'none'));
+      let rs = rows.slice();
+      if (opts.filter) rs = rs.filter(opts.filter);
+      if (s.f) {
+        const num = cols.find((c) => c.f === s.f)?.num;
+        rs.sort((a, b) => { const va = num ? N(a[s.f]) ?? -Infinity : a[s.f], vb = num ? N(b[s.f]) ?? -Infinity : b[s.f]; const c = va < vb ? -1 : va > vb ? 1 : 0; return s.dir === 'ascending' ? c : -c; });
+      }
+      tb.replaceChildren(...rs.map((r) => {
+        const tr = document.createElement('tr'); tr.dataset.key = r[opts.key];
+        if (opts.click) tr.className = 'olx-click';
+        if (opts.on && opts.on(r)) tr.classList.add('olx-on');
+        cols.forEach((c) => {
+          const td = document.createElement('td'); if (c.cls) td.className = c.cls;
+          const v = N(r[c.f]);
+          if (c.bar && v != null) { const b = document.createElement('span'); b.className = 'cb'; b.style.width = Math.max(2, 60 * v / c.bar) + 'px'; if (c.barColor) b.style.background = c.barColor(r); td.append(b); }
+          const span = document.createElement('span'); span.textContent = c.fmt ? (v == null ? '—' : F[c.fmt](v)) : (r[c.f] ?? '—');
+          if (c.style) Object.assign(span.style, c.style(r));
+          td.append(span); tr.append(td);
+        });
+        return tr;
+      }));
+    }
+    t._render = render; render();
+  }
+
+  function drawStateTable() {
+    if (failed('sla_by_state')) return;
+    const raw = get('sla_by_state'); if (!raw) return;
+    const rows = raw.filter((r) => r.state !== 'ALL');
+    const maxRate = d3.max(rows, (r) => N(r.late_rate));
+    table('tbl-states', rows, [
+      { f: 'state' }, { f: 'state_name', cls: 'olx-tl olx-hide-n' }, { f: 'delivered_orders', fmt: 'int', num: 1 }, { f: 'late_orders', fmt: 'int', num: 1 },
+      { f: 'late_rate', fmt: 'pct', num: 1, bar: maxRate }, { f: 'avg_delay_days_when_late', fmt: 'd1', num: 1, cls: 'olx-hide-n' },
+      { f: 'avg_delivery_days', fmt: 'd1', num: 1, cls: 'olx-hide-n' }, { f: 'avg_promised_days', fmt: 'd1', num: 1, cls: 'olx-hide-n' }, { f: 'avg_review_late', fmt: 'd2', num: 1, cls: 'olx-hide-n' }
+    ], { key: 'state', sort: { f: 'late_orders', dir: 'descending' }, click: (k) => dash.setParams({ state: curState() === k ? 'ALL' : k }), on: (r) => r.state === curState() });
+  }
+
+  // ---------- horizontal bars (HTML) ----------
+  function hbars(el, rows, o) {
+    el.replaceChildren();
+    const max = o.max ?? d3.max(rows, o.value);
+    rows.forEach((r) => {
+      const l = document.createElement('div'); l.className = 'l'; l.textContent = o.label(r); l.title = o.label(r);
+      const tr = document.createElement('div'); tr.className = 'tr';
+      const fl = document.createElement('div'); fl.className = 'fl'; fl.style.width = (100 * o.value(r) / max) + '%'; fl.style.background = o.color ? o.color(r) : C.late; if (o.opacity) fl.style.opacity = o.opacity(r); tr.append(fl);
+      if (o.ref != null) { const rf = document.createElement('div'); rf.className = 'ref'; rf.style.left = (100 * o.ref / max) + '%'; tr.append(rf); }
+      const v = document.createElement('div'); v.className = 'v'; v.textContent = o.fmt(r);
+      if (o.sub) { const s = document.createElement('small'); s.textContent = o.sub(r); v.append(s); }
+      el.append(l, tr, v);
+    });
+  }
+
+  function drawWhereBars() {
+    const er = document.getElementById('chart-routes');
+    if (failed('routes')) failBox(er); else if (get('routes')) {
+      const rows = get('routes').slice(0, 12);
+      const st = curState();
+      hbars(er, rows, { label: (r) => r.route, value: (r) => N(r.late_orders), fmt: (r) => F.int(N(r.late_orders)), sub: (r) => F.pct(N(r.late_rate)),
+        color: (r) => st !== 'ALL' && r.customer_state !== st ? C.muted : C.late });
+    }
+    const ed = document.getElementById('chart-distance');
+    if (failed('distance_bands')) failBox(ed); else if (get('distance_bands')) {
+      const rows = get('distance_bands').slice().sort((a, b) => N(a.band_order) - N(b.band_order));
+      hbars(ed, rows, { label: (r) => r.distance_band, value: (r) => N(r.late_rate), fmt: (r) => F.pct(N(r.late_rate)), sub: (r) => `${F.d1(N(r.avg_delivery_days))} / ${F.d1(N(r.avg_promised_days))} d`,
+        color: () => C.late, opacity: (r) => 0.3 + 0.7 * (N(r.band_order) - 1) / Math.max(1, rows.length - 1) });
+    }
+  }
+
+  // ---------- stacked step bars (stages & tracking) ----------
+  function stacked(el, legendEl, rows, segs, o) {
+    el.replaceChildren(); legendEl.replaceChildren();
+    segs.forEach((s) => { const sp = document.createElement('span'); const i = document.createElement('i'); i.style.background = s.color; sp.append(i, document.createTextNode(s.label)); legendEl.append(sp); });
+    if (o.marker) { const sp = document.createElement('span'); const i = document.createElement('i'); i.className = 'olx-line'; i.style.background = C.fg; i.style.width = '2px'; i.style.height = '12px'; sp.append(i, document.createTextNode(o.marker.label)); legendEl.append(sp); }
+    const W = el.clientWidth, rowH = 40, H = rows.length * (rowH + 16) + 28;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+    const ml = measure(svg, rows.map(o.label)) + 12;
+    const total = (r) => d3.sum(segs, (s) => s.value(r));
+    const xmax = d3.max(rows, (r) => Math.max(total(r), o.marker ? o.marker.value(r) : 0)) * 1.04;
+    const x = d3.scaleLinear([0, xmax], [ml, W - 10]);
+    svg.append('g').attr('transform', `translate(0,${H - 22})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor((W - ml) / 80))).tickSize(-(H - 26)).tickFormat((v) => v + (o.unit || ''))).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').remove(); g.selectAll('line').attr('stroke', C.grid); g.selectAll('text').attr('dy', '1em'); });
+    rows.forEach((r, i) => {
+      const y0 = 6 + i * (rowH + 16);
+      svg.append('text').attr('x', 0).attr('y', y0 + rowH / 2).attr('dy', '0.35em').style('fill', C.fg).style('font-weight', 600).text(o.label(r));
+      let acc = 0;
+      segs.forEach((s) => {
+        const v = s.value(r); if (!(v > 0)) return;
+        const xa = x(acc), w = Math.max(1, x(acc + v) - x(acc)); acc += v;
+        svg.append('rect').attr('x', xa).attr('y', y0).attr('width', Math.max(0.5, w - 2)).attr('height', rowH).attr('rx', 4).style('fill', s.color)
+          .on('mousemove', (e) => tip(e, `${o.label(r)} · ${s.label}`, [{ label: o.unitLong || 'Days', value: o.fmt(v), color: s.color }, { label: 'Share of total', value: F.pct(v / total(r)) }])).on('mouseleave', hideTip);
+        if (w > 44) svg.append('text').attr('x', xa + 6).attr('y', y0 + rowH / 2).attr('dy', '0.35em').style('fill', s.ink || 'var(--olx-ink-light)').style('font-weight', 600).style('pointer-events', 'none').text(o.fmt(v));
+      });
+      svg.append('text').attr('x', Math.min(x(acc) + 6, W - 10)).attr('y', y0 + rowH / 2).attr('dy', '0.35em').attr('text-anchor', x(acc) + 60 > W ? 'end' : 'start').style('fill', C.fg).text(x(acc) + 60 > W ? '' : o.fmt(total(r)) + ' total');
+      if (o.marker) { const mx = x(o.marker.value(r)); svg.append('line').attr('x1', mx).attr('x2', mx).attr('y1', y0 - 4).attr('y2', y0 + rowH + 4).style('stroke', C.fg).attr('stroke-width', 2); }
+    });
+  }
+
+  function drawStages() {
+    const el = document.getElementById('chart-stages');
+    if (failed('stage_times')) return failBox(el);
+    const raw = get('stage_times'); if (!raw) return;
+    const st = curState();
+    const s = get('sla_by_state'); const nm = s ? (s.find((r) => r.state === st) || {}).state_name : st;
+    document.getElementById('stage-scope').textContent = st === 'ALL' ? 'All Brazil' : `Customers in ${nm}`;
+    const rows = raw.filter((r) => r.state === st).sort((a, b) => (a.outcome === 'On time' ? 0 : 1) - (b.outcome === 'On time' ? 0 : 1));
+    stacked(el, document.getElementById('stage-legend'), rows, [
+      { label: 'Payment approval', value: (r) => N(r.approval_days), color: C.c3, ink: 'var(--olx-ink-dark)' },
+      { label: 'Seller handoff to carrier', value: (r) => N(r.seller_handoff_days), color: C.c2 },
+      { label: 'Carrier transit', value: (r) => N(r.carrier_transit_days), color: C.c1 }
+    ], { label: (r) => `${r.outcome} (${F.compact(N(r.orders))})`, fmt: (v) => F.d1(v) + ' d', unit: ' d', marker: { label: 'Promised days', value: (r) => N(r.promised_days) } });
+  }
+
+  function drawCause() {
+    const el = document.getElementById('cause-split');
+    if (failed('sla_by_state')) return failBox(el);
+    const raw = get('sla_by_state'); if (!raw) return;
+    const row = raw.find((r) => r.state === curState()); if (!row) return;
+    const s = N(row.seller_late_share);
+    el.replaceChildren();
+    const a = document.createElement('div'); a.style.width = (100 * s) + '%'; a.style.background = C.c2; a.textContent = s > 0.12 ? `Seller ${F.pct0(s)}` : '';
+    const b = document.createElement('div'); b.style.width = (100 * (1 - s)) + '%'; b.style.background = C.c1; b.textContent = `Carrier transit ${F.pct0(1 - s)}`;
+    el.append(a, b);
+  }
+
+  function drawCategories() {
+    const el = document.getElementById('chart-categories');
+    if (failed('categories')) return failBox(el);
+    const rows = get('categories'); const s = get('sla_by_state'); if (!rows || !s) return;
+    const nat = N(s.find((r) => r.state === 'ALL').late_rate);
+    const rs = rows.slice().sort((a, b) => N(b.late_rate) - N(a.late_rate));
+    hbars(el, rs, { label: (r) => r.category, value: (r) => N(r.late_rate), fmt: (r) => F.pct(N(r.late_rate)), sub: (r) => F.compact(N(r.orders)) + ' orders', ref: nat,
+      max: d3.max(rs, (r) => N(r.late_rate)) * 1.05, color: (r) => N(r.late_rate) > nat ? C.late : C.muted });
+  }
+
+  const search = document.getElementById('seller-search');
+  search.addEventListener('input', () => { const t = document.getElementById('tbl-sellers'); if (t._render) drawSellers(); });
+  function drawSellers() {
+    if (failed('sellers')) return;
+    const rows = get('sellers'); if (!rows) return;
+    const q = search.value.trim().toLowerCase();
+    table('tbl-sellers', rows, [
+      { f: 'seller' }, { f: 'seller_state', cls: 'olx-tl' }, { f: 'orders', fmt: 'int', num: 1 }, { f: 'late_orders', fmt: 'int', num: 1 },
+      { f: 'late_rate', fmt: 'pct', num: 1, bar: d3.max(rows, (r) => N(r.late_rate)) }, { f: 'missed_handoff_rate', fmt: 'pct', num: 1, bar: d3.max(rows, (r) => N(r.missed_handoff_rate)), barColor: () => C.c2 },
+      { f: 'avg_handoff_days', fmt: 'd1', num: 1, cls: 'olx-hide-n' }, { f: 'avg_review', fmt: 'd2', num: 1, cls: 'olx-hide-n' }
+    ], { key: 'seller', sort: { f: 'late_orders', dir: 'descending' }, filter: (r) => !q || (r.seller + ' ' + r.seller_state).toLowerCase().includes(q) });
+  }
+
+  // ---------- reviews ----------
+  function drawReviews() {
+    const el = document.getElementById('chart-reviews'); el.replaceChildren();
+    if (failed('reviews_by_delay')) return failBox(el);
+    const raw = get('reviews_by_delay'); if (!raw) return;
+    const rows = raw.map((r) => ({ o: N(r.bucket_order), b: r.delay_bucket, n: N(r.orders), avg: N(r.avg_review), one: N(r.one_star_share), five: N(r.five_star_share), late: N(r.bucket_order) >= 5 })).sort((a, b) => a.o - b.o);
+    const W = el.clientWidth, H = 260;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+    const y = d3.scaleLinear([0, 5], [0, 0]);
+    const m = { t: 24, r: 8, b: 30, l: measure(svg, ['5.0']) + 12 };
+    y.range([H - m.b, m.t]);
+    const x = d3.scaleBand(rows.map((r) => r.b), [m.l, W - m.r]).padding(0.28);
+    svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r)).tickFormat(d3.format('.0f'))).call(clean);
+    const short = x.bandwidth() < 70;
+    svg.append('g').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickSize(0).tickPadding(8).tickFormat((s) => short ? s.replace(' days', 'd').replace('On the day', 'On day') : s)).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').attr('stroke', C.axis); if (x.bandwidth() < 44) g.selectAll('text').attr('transform', 'rotate(-20)').attr('text-anchor', 'end'); });
+    const xb = x(rows.find((r) => r.late).b) - x.step() * x.paddingInner() / 2;
+    svg.append('line').attr('x1', xb).attr('x2', xb).attr('y1', m.t - 10).attr('y2', H - m.b).style('stroke', C.ref).attr('stroke-dasharray', '4 3');
+    svg.append('text').attr('x', xb + 6).attr('y', m.t - 12).style('fill', C.fg).text('Promised date');
+    const bars = svg.append('g').selectAll('rect').data(rows).join('rect').attr('x', (r) => x(r.b)).attr('width', x.bandwidth()).attr('y', (r) => y(r.avg)).attr('height', (r) => y(0) - y(r.avg)).attr('rx', 4).style('fill', (r) => r.late ? C.late : C.c1);
+    svg.append('g').selectAll('text').data(rows).join('text').attr('x', (r) => x(r.b) + x.bandwidth() / 2).attr('y', (r) => y(r.avg) - 6).attr('text-anchor', 'middle').style('fill', C.fg).text((r) => x.bandwidth() > 40 ? `${F.d2(r.avg)}★` : F.d1(r.avg));
+    bars.on('mousemove', (e, r) => tip(e, r.b, [{ label: 'Average review', value: F.d2(r.avg), color: r.late ? C.late : C.c1 }, { label: '1-star share', value: F.pct(r.one) }, { label: '5-star share', value: F.pct(r.five) }, { label: 'Reviewed orders', value: F.int(r.n) }])).on('mouseleave', hideTip);
+  }
+
+  // ---------- simulated ----------
+  function drawSim() {
+    if (failed('sim_live_at_risk')) { } else if (get('sim_live_at_risk')) {
+      const rows = get('sim_live_at_risk');
+      table('tbl-live', rows, [
+        { f: 'order_ref' }, { f: 'customer_state', cls: 'olx-tl' }, { f: 'carrier', cls: 'olx-tl olx-hide-n' }, { f: 'current_stage', cls: 'olx-tl' },
+        { f: 'days_to_promise', fmt: 'int', num: 1 }, { f: 'predicted_delay_days', fmt: 'int', num: 1 },
+        { f: 'risk_score', fmt: 'pct0', num: 1, bar: 1, style: (r) => ({ color: N(r.risk_score) >= 0.8 ? 'var(--color-bad)' : N(r.risk_score) >= 0.65 ? 'var(--color-warn)' : 'var(--color-fg)', fontWeight: 600 }) }
+      ], { key: 'order_ref', sort: { f: 'risk_score', dir: 'descending' } });
+    }
+    const et = document.getElementById('chart-track');
+    if (failed('sim_tracking')) failBox(et); else if (get('sim_tracking')) {
+      const ms = get('sim_tracking').slice().sort((a, b) => N(a.step_order) - N(b.step_order)).filter((r) => N(r.step_order) > 1);
+      const pal = ['var(--olx-r6)', 'var(--olx-r5)', 'var(--olx-r4)', 'var(--olx-r1)', 'var(--olx-r3)', 'var(--olx-r2)'];
+      const rows = [{ label: 'On time', k: 'on_time_hours' }, { label: 'Late', k: 'late_hours' }];
+      stacked(et, document.getElementById('track-legend'), rows, ms.map((m, i) => ({ label: m.milestone, value: (r) => N(m[r.k]), color: pal[i % pal.length], ink: i < 2 ? 'var(--olx-ink-dark)' : undefined })),
+        { label: (r) => r.label, fmt: (v) => F.int(Math.round(v)) + ' h', unit: ' h', unitLong: 'Hours' });
+    }
+    const ec = document.getElementById('chart-carriers');
+    if (failed('sim_carriers')) failBox(ec); else if (get('sim_carriers')) {
+      const rows = get('sim_carriers').slice().sort((a, b) => N(b.late_rate) - N(a.late_rate));
+      hbars(ec, rows, { label: (r) => r.carrier, value: (r) => N(r.late_rate), fmt: (r) => F.pct(N(r.late_rate)), sub: (r) => `${F.d1(N(r.avg_transit_days))} d · R$ ${F.d1(N(r.avg_cost_brl))}`,
+        color: (r) => N(r.late_rate) > 0.1 ? C.late : C.muted });
+    }
+    const ep = document.getElementById('chart-promise');
+    if (failed('sim_promise_model')) failBox(ep); else if (get('sim_promise_model')) {
+      const rows = get('sim_promise_model'); ep.replaceChildren();
+      const W = ep.clientWidth, rh = 46, H = rows.length * rh + 26;
+      const svg = d3.select(ep).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+      const ml = measure(svg, rows.map((r) => r.region)) + 12;
+      const rl = measure(svg, ['12.7% → 6.0%']) + 12;
+      const x = d3.scaleLinear([0, d3.max(rows, (r) => N(r.current_promise_days)) * 1.05], [ml, W - rl]);
+      svg.append('g').attr('transform', `translate(0,${H - 22})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor((W - ml - rl) / 70))).tickSize(-(H - 26)).tickFormat((v) => v + ' d')).call((g) => { g.attr('font-size', null).attr('font-family', null); g.select('.domain').remove(); g.selectAll('line').attr('stroke', C.grid); g.selectAll('text').attr('dy', '1em'); });
+      svg.append('text').attr('x', W).attr('y', 10).attr('text-anchor', 'end').text('Late rate');
+      rows.forEach((r, i) => {
+        const y = 20 + i * rh, a = N(r.current_promise_days), b = N(r.model_promise_days);
+        svg.append('text').attr('x', 0).attr('y', y).attr('dy', '0.35em').style('fill', C.fg).text(r.region);
+        svg.append('line').attr('x1', x(b)).attr('x2', x(a)).attr('y1', y).attr('y2', y).style('stroke', C.grid).attr('stroke-width', 6).attr('stroke-linecap', 'round');
+        const g = svg.append('g');
+        g.append('circle').attr('cx', x(a)).attr('cy', y).attr('r', 6).style('fill', C.muted);
+        g.append('circle').attr('cx', x(b)).attr('cy', y).attr('r', 6).style('fill', C.fg);
+        g.on('mousemove', (e) => tip(e, r.region, [{ label: 'Promised today', value: F.d1(a) + ' d', color: C.muted }, { label: 'Model promise', value: F.d1(b) + ' d', color: C.fg }, { label: 'Late rate today', value: F.pct(N(r.current_late_rate)) }, { label: 'Late rate with model', value: F.pct(N(r.model_late_rate)) }])).on('mouseleave', hideTip);
+        svg.append('text').attr('x', W).attr('y', y).attr('dy', '0.35em').attr('text-anchor', 'end').style('fill', C.fg).text(`${F.pct(N(r.current_late_rate))} → ${F.pct(N(r.model_late_rate))}`);
+      });
+    }
+  }
+
+  // ---------- tabs ----------
+  const tabs = [...root.querySelectorAll('.olx-tab')];
+  let active = 'overview';
+  function show(id, link) {
+    if (!document.getElementById(id)) return;
+    active = id;
+    tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.pane === id)));
+    root.querySelectorAll('.olx-pane').forEach((p) => { p.hidden = p.id !== id; });
+    hideTip(); draw();
+    if (link) dash.setLink(id);
+  }
+  tabs.forEach((t) => t.addEventListener('click', () => show(t.dataset.pane, true)));
+
+  function draw() {
+    drawFilter(); drawMarks();
+    if (active === 'overview') { drawTrend(); drawDist(); }
+    if (active === 'where') { drawQuadrant(); drawStateTable(); drawWhereBars(); }
+    if (active === 'why') { drawStages(); drawCause(); drawCategories(); drawSellers(); }
+    if (active === 'impact') { drawReviews(); }
+    if (active === 'next') { drawSim(); }
+  }
+  dash.onData(draw);
+  const named = location.hash.slice(1);
+  if (named && document.getElementById(named)?.classList.contains('olx-pane')) show(named, false);
+})();
+</script>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+order_ref,customer_state,carrier,current_stage,days_to_promise,predicted_delay_days,risk_score
+SIM-33964,RJ,Carrier B (national),Line haul,2,4,0.93
+SIM-54718,BA,Carrier D (regional NE),Out for delivery,1,5,0.92
+SIM-44143,AL,Carrier E (postal),At destination hub,3,2,0.89
+SIM-32276,MA,Carrier E (postal),Line haul,1,6,0.88
+SIM-99391,CE,Carrier D (regional NE),Awaiting pickup,1,5,0.88
+SIM-11061,RJ,Carrier A (national),Line haul,2,5,0.81
+SIM-18747,ES,Carrier B (national),At destination hub,2,4,0.75
+SIM-27316,SE,Carrier D (regional NE),Line haul,2,3,0.68
+SIM-97210,PI,Carrier E (postal),Awaiting pickup,2,1,0.68
+SIM-72282,RJ,Carrier B (national),Out for delivery,3,2,0.67
+SIM-89365,BA,Carrier A (national),Line haul,3,2,0.64
+SIM-28054,PE,Carrier D (regional NE),At destination hub,3,2,0.55

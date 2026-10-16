@@ -1,0 +1,16 @@
+category,orders,late_orders,avg_delivery_days,avg_review,late_rate
+bed bath table,9167,689,13.0,4.01,0.0752
+health beauty,8608,649,12.0,4.23,0.0754
+sports leisure,7490,495,12.2,4.23,0.0661
+computers accessories,6500,417,13.1,4.08,0.0642
+furniture decor,6213,446,13.1,4.07,0.0718
+housewares,5688,307,11.1,4.2,0.054
+watches gifts,5470,406,12.8,4.13,0.0742
+telephony,4076,291,12.9,4.06,0.0714
+auto,3792,278,12.3,4.15,0.0733
+toys,3778,241,11.7,4.24,0.0638
+cool stuff,3530,209,12.3,4.23,0.0592
+garden tools,3414,225,13.6,4.19,0.0659
+perfumery,3073,202,11.9,4.27,0.0657
+baby,2763,226,12.7,4.12,0.0818
+electronics,2507,192,12.9,4.13,0.0766

@@ -1,0 +1,8 @@
+step_order,milestone,on_time_hours,late_hours
+1,Order paid,0,0
+2,Picked & packed,22,31
+3,Handed to carrier,40,92
+4,Arrived at origin hub,9,15
+5,Line haul to destination hub,96,388
+6,Out for delivery,14,40
+7,Delivered,5,27

@@ -1,0 +1,6 @@
+region,current_late_rate,current_promise_days,model_late_rate,model_promise_days
+North,0.086,38.2,0.06,30.2
+Northeast,0.127,31.3,0.06,26.9
+Center-West,0.065,27.3,0.05,20.7
+Southeast,0.061,22.2,0.05,15.4
+South,0.059,27.1,0.05,19.5
